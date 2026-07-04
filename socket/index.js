@@ -45,9 +45,9 @@ wss.on("connection", (ws) => {
           activePairs.set(ws.id, partnerId)
           activePairs.set(partnerId, ws.id)
 
-          // Assign roles: isInitiator true for initiator (the one who gets matched), false for responder
-          ws.send(JSON.stringify({ type: "matched", roomId, isInitiator: true }))
-          partnerWs.send(JSON.stringify({ type: "matched", roomId, isInitiator: false }))
+          const isWsInitiator = ws.id < partnerId
+          ws.send(JSON.stringify({ type: "matched", roomId, isInitiator: isWsInitiator }))
+          partnerWs.send(JSON.stringify({ type: "matched", roomId, isInitiator: !isWsInitiator }))
           return
         }
       }

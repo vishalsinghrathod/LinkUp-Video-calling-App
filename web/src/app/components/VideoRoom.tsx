@@ -29,6 +29,7 @@ function VideoRoom({ roomId, ws, isInitiator }: VideoRoomProps) {
 
   const localVideoRef = useRef<HTMLVideoElement | null>(null)
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null)
+  const localStreamRef = useRef<MediaStream | null>(null)
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null)
   const queuedCandidatesRef = useRef<any[]>([])
   const pendingOfferRef = useRef<RTCSessionDescriptionInit | null>(null)
@@ -69,6 +70,7 @@ function VideoRoom({ roomId, ws, isInitiator }: VideoRoomProps) {
           audio: true
         });
         localStreamInstance = stream;
+        localStreamRef.current = stream;
         setLocalStream(stream);
 
         // Check if there was a pending offer waiting for this local stream
@@ -136,9 +138,19 @@ function VideoRoom({ roomId, ws, isInitiator }: VideoRoomProps) {
     };
 
     pc.ontrack = (event) => {
-      console.log("Received remote stream track from peer connection");
-      if (event.streams && event.streams[0]) {
-        setRemoteStream(event.streams[0]);
+      console.log("Received remote track:", event.track.kind);
+      if (!remoteVideoRef.current) return;
+
+      let stream = remoteVideoRef.current.srcObject as MediaStream;
+      if (!stream) {
+        stream = event.streams[0] || new MediaStream();
+        remoteVideoRef.current.srcObject = stream;
+        setRemoteStream(stream);
+      }
+
+      const hasTrack = stream.getTracks().some(t => t.id === event.track.id);
+      if (!hasTrack) {
+        stream.addTrack(event.track);
       }
     };
 
@@ -257,15 +269,15 @@ function VideoRoom({ roomId, ws, isInitiator }: VideoRoomProps) {
       }
 
       if (data.type === "initiate") {
-        if (isInitiator && localStream) {
-          initiateCall(localStream);
+        if (isInitiator && localStreamRef.current) {
+          initiateCall(localStreamRef.current);
         }
       } else if (data.type === "signal") {
         const { sdp, candidate } = data.data;
         if (sdp) {
           if (sdp.type === "offer") {
-            if (localStream) {
-              handleOffer(sdp, localStream);
+            if (localStreamRef.current) {
+              handleOffer(sdp, localStreamRef.current);
             } else {
               pendingOfferRef.current = sdp;
             }
@@ -288,7 +300,7 @@ function VideoRoom({ roomId, ws, isInitiator }: VideoRoomProps) {
     return () => {
       ws.removeEventListener("message", onMessage);
     };
-  }, [ws, isInitiator, localStream]);
+  }, [ws, isInitiator]);
 
   // Toggle Mute Audio
   const toggleMute = () => {
