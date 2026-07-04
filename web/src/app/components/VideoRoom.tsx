@@ -117,13 +117,22 @@ function VideoRoom({ roomId, ws, isInitiator }: VideoRoomProps) {
     }
 
     console.log("Setting up RTCPeerConnection...");
-    const pc = new RTCPeerConnection({
-      iceServers: [
-        { urls: "stun:stun.l.google.com:19302" },
-        { urls: "stun:stun1.l.google.com:19302" },
-        { urls: "stun:stun2.l.google.com:19302" }
-      ]
-    });
+    let iceServers = [
+      { urls: "stun:stun.l.google.com:19302" },
+      { urls: "stun:stun1.l.google.com:19302" },
+      { urls: "stun:stun2.l.google.com:19302" }
+    ];
+
+    if (process.env.NEXT_PUBLIC_ICE_SERVERS) {
+      try {
+        iceServers = JSON.parse(process.env.NEXT_PUBLIC_ICE_SERVERS);
+        console.log("Custom ICE/TURN servers loaded successfully.");
+      } catch (e) {
+        console.error("Error parsing NEXT_PUBLIC_ICE_SERVERS env:", e);
+      }
+    }
+
+    const pc = new RTCPeerConnection({ iceServers });
 
     // Add local media tracks
     stream.getTracks().forEach(track => {
