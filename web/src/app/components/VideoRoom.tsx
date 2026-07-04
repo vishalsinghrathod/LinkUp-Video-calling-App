@@ -11,6 +11,11 @@ function VideoRoom({ roomId }: { roomId: string }) {
     let zpInstance: any = null;
 
     const start = async () => {
+      // Allow 800ms for any previous Zego session to fully close and release resources
+      await new Promise((resolve) => setTimeout(resolve, 800));
+
+      if (!active) return;
+
       const { ZegoUIKitPrebuilt } = await import("@zegocloud/zego-uikit-prebuilt");
       
       if (!active) return;
