@@ -8,6 +8,30 @@ import { io } from "socket.io-client";
 import { useEffect, useState } from "react";
 import VideoRoom from "./components/VideoRoom";
 
+// Monkey-patch WebSocket.prototype.close to prevent "WebSocket is closed before the connection is established" warning.
+// If the socket is in CONNECTING state, queue the close until it transitions to OPEN or encounters an error.
+if (typeof window !== "undefined" && window.WebSocket) {
+  const originalClose = window.WebSocket.prototype.close;
+  window.WebSocket.prototype.close = function (this: WebSocket, ...args: any[]) {
+    if (this.readyState === window.WebSocket.CONNECTING) {
+      const self = this;
+      const openHandler = () => {
+        self.removeEventListener("open", openHandler);
+        self.removeEventListener("error", errorHandler);
+        originalClose.apply(self, args as any);
+      };
+      const errorHandler = () => {
+        self.removeEventListener("open", openHandler);
+        self.removeEventListener("error", errorHandler);
+      };
+      self.addEventListener("open", openHandler);
+      self.addEventListener("error", errorHandler);
+    } else {
+      originalClose.apply(this, args as any);
+    }
+  };
+}
+
 const socket = io(process.env.NEXT_PUBLIC_SOCKET_URL, {
   transports: ["websocket"]
 })
@@ -16,6 +40,7 @@ export default function Home() {
 
   const [status, setStatus] = useState("idle")
   const [roomId, setRoomId] = useState("")
+  const [tempRoomId, setTempRoomId] = useState("")
   const [logs, setLogs] = useState<string[]>([])
 
   useEffect(() => {
@@ -56,17 +81,19 @@ export default function Home() {
   const handleNext = () => {
     socket.emit("leave")
     setRoomId("")
+    setTempRoomId("")
     setStatus("idle")
   }
 
   useEffect(() => {
     socket.on("matched", ({ roomId }) => {
-      setRoomId(roomId)
-      setStatus("chatting")
+      setTempRoomId(roomId)
+      setStatus("matched")
     })
 
     socket.on("partnerDisconnected", () => {
       setRoomId("")
+      setTempRoomId("")
       setStatus("idle")
     })
 
@@ -137,6 +164,35 @@ export default function Home() {
                 Matching you with someone new...
               </motion.p>
             </motion.div>}
+
+          {status === "matched" && (
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              transition={{ duration: 0.4 }}
+              className="relative z-10 flex flex-col items-center justify-center min-h-screen px-6 text-center"
+            >
+              <div className="mb-6 flex items-center justify-center w-16 h-16 rounded-2xl bg-green-500/10 text-green-400 border border-green-500/20 animate-pulse">
+                <Sparkle size={28} />
+              </div>
+              <h2 className="text-3xl font-bold tracking-tight mb-2">Match Found! ⚡</h2>
+              <p className="text-zinc-400 max-w-sm mb-8 text-sm sm:text-base">
+                A stranger is ready to chat. Tap the button below to connect your video & audio.
+              </p>
+              <motion.button
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={() => {
+                  setRoomId(tempRoomId)
+                  setStatus("chatting")
+                }}
+                className="flex items-center gap-3 px-8 py-4 rounded-2xl bg-linear-to-r from-emerald-500 to-green-600 text-white font-semibold text-lg shadow-xl shadow-green-500/20 cursor-pointer"
+              >
+                <Video size={22} /> Connect Video Call
+              </motion.button>
+            </motion.div>
+          )}
 
           {status === "chatting" && roomId && (
 
