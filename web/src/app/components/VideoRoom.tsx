@@ -26,6 +26,7 @@ function VideoRoom({ roomId, ws, isInitiator }: VideoRoomProps) {
     { sender: 'system', text: 'You are now matched! Connect to begin.', timestamp: new Date() }
   ])
   const [inputText, setInputText] = useState("")
+  const [isMyVideoMain, setIsMyVideoMain] = useState(false)
 
   const localVideoRef = useRef<HTMLVideoElement | null>(null)
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null)
@@ -353,49 +354,67 @@ function VideoRoom({ roomId, ws, isInitiator }: VideoRoomProps) {
       
       {/* LEFT COLUMN: Video Feeds */}
       <div className="flex-1 flex flex-col p-4 gap-4 h-1/2 md:h-full justify-between items-center relative overflow-hidden">
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-1 lg:grid-cols-2 gap-4 w-full h-full max-h-[75vh]">
+        <div className="relative w-full h-full max-h-[75vh] bg-zinc-950 rounded-2xl overflow-hidden border border-white/5 shadow-2xl flex items-center justify-center">
           
           {/* STRANGER VIDEO WINDOW */}
-          <div className="relative bg-zinc-900/60 border border-white/5 rounded-2xl overflow-hidden shadow-2xl flex items-center justify-center aspect-video sm:aspect-auto">
+          <div 
+            onClick={() => isMyVideoMain && setIsMyVideoMain(false)}
+            className={`${
+              isMyVideoMain 
+                ? 'absolute bottom-4 right-4 w-32 sm:w-48 aspect-video rounded-xl border border-white/20 shadow-2xl z-10 cursor-pointer hover:scale-105 hover:border-purple-500 transition-all duration-300' 
+                : 'w-full h-full relative'
+            } bg-zinc-900/60 overflow-hidden flex items-center justify-center`}
+          >
             {remoteStream ? (
               <video
                 ref={remoteVideoRef}
                 autoPlay
                 playsInline
-                className="w-full h-full object-cover rounded-2xl"
+                className="w-full h-full object-cover"
               />
             ) : (
-              <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-4 bg-zinc-950/40 backdrop-blur-xs">
-                <Loader2 className="animate-spin text-purple-500 mb-3" size={32} />
-                <p className="text-zinc-300 font-medium text-sm">Connecting media stream...</p>
-                <p className="text-zinc-500 text-xs mt-1">Establishing peer-to-peer connection</p>
+              <div className="absolute inset-0 flex flex-col items-center justify-center text-center bg-zinc-950/40 backdrop-blur-xs p-2">
+                <Loader2 className="animate-spin text-purple-500 mb-1.5" size={isMyVideoMain ? 20 : 32} />
+                {!isMyVideoMain && (
+                  <>
+                    <p className="text-zinc-300 font-medium text-[10px] sm:text-xs">Connecting media stream...</p>
+                    <p className="text-zinc-500 text-[8px] mt-0.5">Establishing peer-to-peer connection</p>
+                  </>
+                )}
               </div>
             )}
             
-            <div className="absolute top-3 left-3 px-3 py-1 rounded-full bg-black/60 backdrop-blur-md text-xs font-semibold text-white/90 border border-white/10 flex items-center gap-1.5 shadow-md">
+            <div className={`absolute ${isMyVideoMain ? 'top-1.5 left-1.5 text-[8px]' : 'top-3 left-3 text-xs'} px-2.5 py-0.5 rounded-full bg-black/60 backdrop-blur-md font-semibold text-white/90 border border-white/10 flex items-center gap-1 shadow-md select-none`}>
               <span className="w-1.5 h-1.5 rounded-full bg-purple-500 animate-pulse"></span>
               Stranger
             </div>
           </div>
 
           {/* LOCAL VIDEO WINDOW */}
-          <div className="relative bg-zinc-900/60 border border-white/5 rounded-2xl overflow-hidden shadow-2xl flex items-center justify-center aspect-video sm:aspect-auto">
+          <div 
+            onClick={() => !isMyVideoMain && setIsMyVideoMain(true)}
+            className={`${
+              !isMyVideoMain 
+                ? 'absolute bottom-4 right-4 w-32 sm:w-48 aspect-video rounded-xl border border-white/20 shadow-2xl z-10 cursor-pointer hover:scale-105 hover:border-green-500 transition-all duration-300' 
+                : 'w-full h-full relative'
+            } bg-zinc-900/60 overflow-hidden flex items-center justify-center`}
+          >
             {!isVideoOff && localStream ? (
               <video
                 ref={localVideoRef}
                 autoPlay
                 playsInline
                 muted
-                className="w-full h-full object-cover rounded-2xl scale-x-[-1]"
+                className="w-full h-full object-cover scale-x-[-1]"
               />
             ) : (
-              <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-4 bg-zinc-950/80">
-                <VideoOff className="text-zinc-500 mb-3" size={36} />
-                <p className="text-zinc-400 font-medium text-sm">Your Camera is Off</p>
+              <div className="absolute inset-0 flex flex-col items-center justify-center text-center bg-zinc-950/80 p-2">
+                <VideoOff className="text-zinc-500 mb-1" size={!isMyVideoMain ? 20 : 32} />
+                {isMyVideoMain && <p className="text-zinc-400 font-medium text-xs">Your Camera is Off</p>}
               </div>
             )}
 
-            <div className="absolute top-3 left-3 px-3 py-1 rounded-full bg-black/60 backdrop-blur-md text-xs font-semibold text-white/90 border border-white/10 flex items-center gap-1.5 shadow-md">
+            <div className={`absolute ${!isMyVideoMain ? 'top-1.5 left-1.5 text-[8px]' : 'top-3 left-3 text-xs'} px-2.5 py-0.5 rounded-full bg-black/60 backdrop-blur-md font-semibold text-white/90 border border-white/10 flex items-center gap-1 shadow-md select-none`}>
               <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span>
               You
             </div>
