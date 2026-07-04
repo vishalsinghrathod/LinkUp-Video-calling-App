@@ -69,6 +69,9 @@ export default function Home() {
               Anonymous video conversations with strangers worldwide.
               No sign-up. No identity. Just pure connection.
             </p>
+            <div className="text-xs text-zinc-500 mb-4 bg-white/5 px-3 py-1 rounded-full border border-white/5">
+              Debug Config: AppID={process.env.NEXT_PUBLIC_ZEGO_APP_ID ? "OK" : "MISSING"} | Secret={process.env.NEXT_PUBLIC_ZEGO_SERVER_SECRET ? "OK" : "MISSING"}
+            </div>
 
             <motion.button
               whileHover={{ scale: 1.09 }}
