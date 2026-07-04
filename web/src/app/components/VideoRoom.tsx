@@ -56,6 +56,41 @@ function VideoRoom({ roomId, ws, isInitiator }: VideoRoomProps) {
     }
   }, [remoteStream])
 
+  // Diagnostic check for ICE Servers on mount
+  useEffect(() => {
+    let rawIce = process.env.NEXT_PUBLIC_ICE_SERVERS;
+    if (rawIce) {
+      rawIce = rawIce.trim();
+      if (rawIce.startsWith("'") && rawIce.endsWith("'")) {
+        rawIce = rawIce.slice(1, -1);
+      }
+      if (rawIce.startsWith('"') && rawIce.endsWith('"')) {
+        rawIce = rawIce.slice(1, -1);
+      }
+      try {
+        const parsed = JSON.parse(rawIce);
+        const hasTurn = parsed.some((s: any) => s.urls && (String(s.urls).startsWith("turn:") || String(s.urls).startsWith("turns:")));
+        setMessages(prev => [...prev, {
+          sender: 'system',
+          text: `ICE Config: Loaded (${parsed.length} servers, TURN: ${hasTurn ? "YES" : "NO"})`,
+          timestamp: new Date()
+        }]);
+      } catch (e: any) {
+        setMessages(prev => [...prev, {
+          sender: 'system',
+          text: `ICE Config Error: ${e.message}`,
+          timestamp: new Date()
+        }]);
+      }
+    } else {
+      setMessages(prev => [...prev, {
+        sender: 'system',
+        text: "ICE Config: Default public STUN only (No TURN config loaded)",
+        timestamp: new Date()
+      }]);
+    }
+  }, []);
+
   // Get user media and signal ready state
   useEffect(() => {
     let localStreamInstance: MediaStream | null = null;
@@ -123,9 +158,17 @@ function VideoRoom({ roomId, ws, isInitiator }: VideoRoomProps) {
       { urls: "stun:stun2.l.google.com:19302" }
     ];
 
-    if (process.env.NEXT_PUBLIC_ICE_SERVERS) {
+    let rawIce = process.env.NEXT_PUBLIC_ICE_SERVERS;
+    if (rawIce) {
+      rawIce = rawIce.trim();
+      if (rawIce.startsWith("'") && rawIce.endsWith("'")) {
+        rawIce = rawIce.slice(1, -1);
+      }
+      if (rawIce.startsWith('"') && rawIce.endsWith('"')) {
+        rawIce = rawIce.slice(1, -1);
+      }
       try {
-        iceServers = JSON.parse(process.env.NEXT_PUBLIC_ICE_SERVERS);
+        iceServers = JSON.parse(rawIce);
         console.log("Custom ICE/TURN servers loaded successfully.");
       } catch (e) {
         console.error("Error parsing NEXT_PUBLIC_ICE_SERVERS env:", e);
