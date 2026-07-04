@@ -30,6 +30,7 @@ function VideoRoom({ roomId, ws, isInitiator }: VideoRoomProps) {
   const localVideoRef = useRef<HTMLVideoElement | null>(null)
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null)
   const localStreamRef = useRef<MediaStream | null>(null)
+  const remoteStreamRef = useRef<MediaStream | null>(null)
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null)
   const queuedCandidatesRef = useRef<any[]>([])
   const pendingOfferRef = useRef<RTCSessionDescriptionInit | null>(null)
@@ -139,18 +140,21 @@ function VideoRoom({ roomId, ws, isInitiator }: VideoRoomProps) {
 
     pc.ontrack = (event) => {
       console.log("Received remote track:", event.track.kind);
-      if (!remoteVideoRef.current) return;
 
-      let stream = remoteVideoRef.current.srcObject as MediaStream;
+      let stream = remoteStreamRef.current;
       if (!stream) {
         stream = event.streams[0] || new MediaStream();
-        remoteVideoRef.current.srcObject = stream;
+        remoteStreamRef.current = stream;
         setRemoteStream(stream);
       }
 
       const hasTrack = stream.getTracks().some(t => t.id === event.track.id);
       if (!hasTrack) {
         stream.addTrack(event.track);
+      }
+
+      if (remoteVideoRef.current) {
+        remoteVideoRef.current.srcObject = stream;
       }
     };
 
