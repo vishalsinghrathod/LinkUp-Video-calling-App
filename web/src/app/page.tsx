@@ -14,37 +14,7 @@ export default function Home() {
   const [tempRoomId, setTempRoomId] = useState("")
   const [isInitiator, setIsInitiator] = useState(false)
   const [ws, setWs] = useState<WebSocket | null>(null)
-  const [logs, setLogs] = useState<string[]>([])
 
-  useEffect(() => {
-    const originalLog = console.log
-    const originalError = console.error
-    const originalWarn = console.warn
-
-    const addLog = (type: string, ...args: any[]) => {
-      const msg = args.map(arg => typeof arg === 'object' ? JSON.stringify(arg) : String(arg)).join(' ')
-      setLogs(prev => [...prev.slice(-30), `[${type}] ${msg}`])
-    }
-
-    console.log = (...args) => {
-      originalLog(...args)
-      addLog('LOG', ...args)
-    }
-    console.error = (...args) => {
-      originalError(...args)
-      addLog('ERR', ...args)
-    }
-    console.warn = (...args) => {
-      originalWarn(...args)
-      addLog('WARN', ...args)
-    }
-
-    return () => {
-      console.log = originalLog
-      console.error = originalError
-      console.warn = originalWarn
-    }
-  }, [])
 
   const connectSocket = () => {
     const rawUrl = process.env.NEXT_PUBLIC_SOCKET_URL || "http://localhost:8000";
@@ -250,21 +220,7 @@ export default function Home() {
 
         </AnimatePresence>
 
-        {/* On-screen Debug Logs Console */}
-        <div className="fixed bottom-4 left-4 right-4 z-50 bg-black/90 border border-white/20 rounded-xl max-h-40 overflow-y-auto p-3 text-[9px] font-mono text-zinc-300 pointer-events-auto">
-          <div className="font-bold border-b border-white/10 pb-1 mb-1 flex justify-between items-center text-[10px]">
-            <span>System Console Logs</span>
-            <button className="text-red-500 underline text-[10px]" onClick={() => setLogs([])}>Clear</button>
-          </div>
-          <div className="space-y-1">
-            {logs.length === 0 && <div className="text-zinc-500">No logs yet. Try starting a call...</div>}
-            {logs.map((log, index) => (
-              <div key={index} className={log.startsWith('[ERR]') ? 'text-red-400 font-bold' : log.startsWith('[WARN]') ? 'text-yellow-400' : 'text-zinc-300'}>
-                {log}
-              </div>
-            ))}
-          </div>
-        </div>
+
 
       </main>
       <Footer />
