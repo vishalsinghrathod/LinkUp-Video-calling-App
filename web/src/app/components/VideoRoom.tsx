@@ -15,9 +15,7 @@ function VideoRoom({ roomId }: { roomId: string }) {
       
       if (!active) return;
 
-      const userId = (typeof crypto !== "undefined" && crypto.randomUUID)
-        ? crypto.randomUUID()
-        : Math.random().toString(36).substring(2, 15);
+      const userId = "user_" + Math.random().toString(36).substring(2, 15) + Date.now().toString(36);
       const kitToken = ZegoUIKitPrebuilt.generateKitTokenForTest(
         Number(process.env.NEXT_PUBLIC_ZEGO_APP_ID),
         process.env.NEXT_PUBLIC_ZEGO_SERVER_SECRET!,
