@@ -4,43 +4,16 @@ import { Video } from "lucide-react";
 import Navbar from "./components/Navbar";
 import { AnimatePresence, motion } from "motion/react"
 import Footer from "./components/Footer";
-import { io } from "socket.io-client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import VideoRoom from "./components/VideoRoom";
-
-// Monkey-patch WebSocket.prototype.close to prevent "WebSocket is closed before the connection is established" warning.
-// If the socket is in CONNECTING state, queue the close until it transitions to OPEN or encounters an error.
-if (typeof window !== "undefined" && window.WebSocket) {
-  const originalClose = window.WebSocket.prototype.close;
-  window.WebSocket.prototype.close = function (this: WebSocket, ...args: any[]) {
-    if (this.readyState === window.WebSocket.CONNECTING) {
-      const self = this;
-      const openHandler = () => {
-        self.removeEventListener("open", openHandler);
-        self.removeEventListener("error", errorHandler);
-        originalClose.apply(self, args as any);
-      };
-      const errorHandler = () => {
-        self.removeEventListener("open", openHandler);
-        self.removeEventListener("error", errorHandler);
-      };
-      self.addEventListener("open", openHandler);
-      self.addEventListener("error", errorHandler);
-    } else {
-      originalClose.apply(this, args as any);
-    }
-  };
-}
-
-const socket = io(process.env.NEXT_PUBLIC_SOCKET_URL, {
-  transports: ["websocket"]
-})
 
 export default function Home() {
 
   const [status, setStatus] = useState("idle")
   const [roomId, setRoomId] = useState("")
   const [tempRoomId, setTempRoomId] = useState("")
+  const [isInitiator, setIsInitiator] = useState(false)
+  const [ws, setWs] = useState<WebSocket | null>(null)
   const [logs, setLogs] = useState<string[]>([])
 
   useEffect(() => {
@@ -73,35 +46,84 @@ export default function Home() {
     }
   }, [])
 
+  const connectSocket = () => {
+    const rawUrl = process.env.NEXT_PUBLIC_SOCKET_URL || "http://localhost:8000";
+    const wsUrl = rawUrl.replace(/^http/, "ws");
+    console.log("Connecting to WebSocket:", wsUrl);
+    const socket = new WebSocket(wsUrl);
+
+    socket.onopen = () => {
+      console.log("WebSocket connected successfully");
+      socket.send(JSON.stringify({ type: "start" }));
+      setStatus("waiting");
+    };
+
+    socket.onmessage = (event) => {
+      let data;
+      try {
+        data = JSON.parse(event.data);
+      } catch (e) {
+        console.error("Error parsing message:", event.data);
+        return;
+      }
+
+      console.log("Signal received:", data.type);
+
+      if (data.type === "matched") {
+        setTempRoomId(data.roomId);
+        setIsInitiator(data.isInitiator);
+        setStatus("matched");
+      } else if (data.type === "partnerDisconnected") {
+        console.log("Partner disconnected");
+        setRoomId("");
+        setTempRoomId("");
+        setIsInitiator(false);
+        setStatus("idle");
+      }
+    };
+
+    socket.onclose = () => {
+      console.log("WebSocket closed");
+      setWs(null);
+      setRoomId("");
+      setTempRoomId("");
+      setIsInitiator(false);
+      setStatus("idle");
+    };
+
+    socket.onerror = (err) => {
+      console.error("WebSocket error:", err);
+    };
+
+    setWs(socket);
+  };
+
   const startChat = () => {
-    socket.emit("start")
-    setStatus("waiting")
-  }
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "start" }));
+      setStatus("waiting");
+    } else {
+      connectSocket();
+    }
+  };
 
   const handleNext = () => {
-    socket.emit("leave")
-    setRoomId("")
-    setTempRoomId("")
-    setStatus("idle")
-  }
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "leave" }));
+    }
+    setRoomId("");
+    setTempRoomId("");
+    setIsInitiator(false);
+    setStatus("idle");
+  };
 
   useEffect(() => {
-    socket.on("matched", ({ roomId }) => {
-      setTempRoomId(roomId)
-      setStatus("matched")
-    })
-
-    socket.on("partnerDisconnected", () => {
-      setRoomId("")
-      setTempRoomId("")
-      setStatus("idle")
-    })
-
     return () => {
-      socket.off("matched")
-      socket.off("partnerDisconnected")
-    }
-  }, [])
+      if (ws) {
+        ws.close();
+      }
+    };
+  }, [ws]);
 
   return (
     <div>
@@ -128,7 +150,7 @@ export default function Home() {
               No sign-up. No identity. Just pure connection.
             </p>
             <div className="text-xs text-zinc-500 mb-4 bg-white/5 px-3 py-1 rounded-full border border-white/5">
-              Debug Config: AppID={process.env.NEXT_PUBLIC_ZEGO_APP_ID ? "OK" : "MISSING"} | Secret={process.env.NEXT_PUBLIC_ZEGO_SERVER_SECRET ? "OK" : "MISSING"}
+              Debug Config: SocketURL={process.env.NEXT_PUBLIC_SOCKET_URL || "default"}
             </div>
 
             <motion.button
@@ -194,7 +216,7 @@ export default function Home() {
             </motion.div>
           )}
 
-          {status === "chatting" && roomId && (
+          {status === "chatting" && roomId && ws && (
 
             <motion.div
               initial={{ opacity: 0 }}
@@ -213,15 +235,15 @@ export default function Home() {
                 whileHover={{scale: 1.05}} 
                 whileTap={{scale: 0.95}}
                 onClick={handleNext}
-                className="flex items-center gap-2 px-4 py-2 rounded-full bg-red-500 text-white font-medium"
+                className="flex items-center gap-2 px-4 py-2 rounded-full bg-red-500 text-white font-medium cursor-pointer"
                 >
                   <Shuffle size={16} />
                   Next
                 </motion.button>
               </div>
 
-              <div className="flex-1 relative">
-                <VideoRoom roomId={roomId} />
+              <div className="flex-1 relative overflow-hidden">
+                <VideoRoom roomId={roomId} ws={ws} isInitiator={isInitiator} />
               </div>
             </motion.div>
           )}
