@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef, useState } from 'react'
 import { motion } from 'motion/react'
-import { Mic, MicOff, Video as VideoIcon, VideoOff, Send, Loader2, Sparkles, MessageSquare, Monitor, MonitorOff, Smile, HelpCircle, Filter } from 'lucide-react'
+import { Mic, MicOff, Video as VideoIcon, VideoOff, Send, Loader2, Sparkles, MessageSquare, Smile, HelpCircle, Filter, Image as ImageIcon } from 'lucide-react'
 
 interface VideoRoomProps {
   roomId: string;
@@ -12,12 +12,14 @@ interface VideoRoomProps {
 
 interface Message {
   sender: 'me' | 'stranger' | 'system';
-  text: string;
+  text?: string;
+  image?: string;
   timestamp: Date;
 }
 
 function VideoRoom({ roomId, ws, isInitiator }: VideoRoomProps) {
   const [localStream, setLocalStream] = useState<MediaStream | null>(null)
+  const [selectedLightboxImage, setSelectedLightboxImage] = useState<string | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null)
   const [connectionState, setConnectionState] = useState<string>("new")
   const [isMuted, setIsMuted] = useState(false)
@@ -48,10 +50,6 @@ function VideoRoom({ roomId, ws, isInitiator }: VideoRoomProps) {
     "What's your go-to comfort food?",
     "If you could live in any fictional universe (books/movies), where would it be?"
   ];
-
-  // Screen sharing states & refs
-  const [isScreenSharing, setIsScreenSharing] = useState(false);
-  const screenStreamRef = useRef<MediaStream | null>(null);
 
   // Video filter list & states
   const VIDEO_FILTERS = [
@@ -91,15 +89,10 @@ function VideoRoom({ roomId, ws, isInitiator }: VideoRoomProps) {
 
   // Attach local stream to element when ready
   useEffect(() => {
-    const videoElement = localVideoRef.current;
-    if (!videoElement) return;
-
-    if (isScreenSharing && screenStreamRef.current) {
-      videoElement.srcObject = screenStreamRef.current;
-    } else if (localStream) {
-      videoElement.srcObject = localStream;
+    if (localStream && localVideoRef.current) {
+      localVideoRef.current.srcObject = localStream;
     }
-  }, [localStream, isScreenSharing, isVideoOff]);
+  }, [localStream, isVideoOff]);
 
   // Attach remote stream to element when ready
   useEffect(() => {
@@ -193,9 +186,6 @@ function VideoRoom({ roomId, ws, isInitiator }: VideoRoomProps) {
       }
       if (localStreamInstance) {
         localStreamInstance.getTracks().forEach(track => track.stop());
-      }
-      if (screenStreamRef.current) {
-        screenStreamRef.current.getTracks().forEach(track => track.stop());
       }
       if (typingTimeoutRef.current) {
         clearTimeout(typingTimeoutRef.current);
@@ -403,11 +393,19 @@ function VideoRoom({ roomId, ws, isInitiator }: VideoRoomProps) {
           handleCandidate(candidate);
         }
       } else if (data.type === "chat") {
-        setMessages(prev => [...prev, {
-          sender: "stranger",
-          text: data.message,
-          timestamp: new Date()
-        }]);
+        if (data.message.startsWith("[IMAGE]:")) {
+          setMessages(prev => [...prev, {
+            sender: "stranger",
+            image: data.message.substring(8),
+            timestamp: new Date()
+          }]);
+        } else {
+          setMessages(prev => [...prev, {
+            sender: "stranger",
+            text: data.message,
+            timestamp: new Date()
+          }]);
+        }
       } else if (data.type === "reaction") {
         triggerReaction(data.reaction);
       } else if (data.type === "icebreaker") {
@@ -461,110 +459,7 @@ function VideoRoom({ roomId, ws, isInitiator }: VideoRoomProps) {
     }
   };
 
-  // Helper to toggle screen share
-  const toggleScreenShare = async () => {
-    if (!peerConnectionRef.current) {
-      setMessages(prev => [...prev, {
-        sender: 'system',
-        text: "⚠️ Screen Share failed: No active connection with stranger.",
-        timestamp: new Date()
-      }]);
-      return;
-    }
 
-    if (!isScreenSharing) {
-      try {
-        console.log("Requesting screen share stream...");
-        const stream = await navigator.mediaDevices.getDisplayMedia({
-          video: true,
-          audio: false
-        });
-        screenStreamRef.current = stream;
-
-        const screenTrack = stream.getVideoTracks()[0];
-        console.log("Got screen share track:", screenTrack);
-        
-        // Find video sender (standard or fallback with null track)
-        const senders = peerConnectionRef.current.getSenders();
-        const videoSender = senders.find(s => s.track?.kind === 'video' || (s.track === null && s.dtmf === null));
-        
-        if (videoSender) {
-          console.log("Replacing WebRTC video track with screen track...");
-          await videoSender.replaceTrack(screenTrack);
-        } else {
-          console.warn("No video sender found. Attempting fallback...");
-          const fallbackSender = senders.find(s => s.track && s.track.kind !== 'audio');
-          if (fallbackSender) {
-            await fallbackSender.replaceTrack(screenTrack);
-          } else {
-            throw new Error("No video transmitter found on the connection.");
-          }
-        }
-
-        // Set local video to screen stream
-        if (localVideoRef.current) {
-          localVideoRef.current.srcObject = stream;
-        }
-
-        // Listen for track end
-        screenTrack.onended = () => {
-          console.log("Screen share track ended natively");
-          stopScreenShareDirectly();
-        };
-
-        setIsScreenSharing(true);
-        setMessages(prev => [...prev, {
-          sender: 'system',
-          text: "🖥️ You started sharing your screen.",
-          timestamp: new Date()
-        }]);
-      } catch (err: any) {
-        console.error("Failed to start screen share:", err);
-        setMessages(prev => [...prev, {
-          sender: 'system',
-          text: `⚠️ Screen Share Error: ${err.message || err}`,
-          timestamp: new Date()
-        }]);
-        if (screenStreamRef.current) {
-          screenStreamRef.current.getTracks().forEach(t => t.stop());
-          screenStreamRef.current = null;
-        }
-      }
-    } else {
-      await stopScreenShareDirectly();
-    }
-  };
-
-  const stopScreenShareDirectly = async () => {
-    console.log("Stopping screen share...");
-    if (screenStreamRef.current) {
-      screenStreamRef.current.getTracks().forEach(t => t.stop());
-      screenStreamRef.current = null;
-    }
-
-    if (localStreamRef.current && peerConnectionRef.current) {
-      const cameraTrack = localStreamRef.current.getVideoTracks()[0];
-      const senders = peerConnectionRef.current.getSenders();
-      const videoSender = senders.find(s => s.track?.kind === 'video' || (s.track === null && s.dtmf === null));
-      
-      if (videoSender && cameraTrack) {
-        console.log("Restoring WebRTC camera track...");
-        await videoSender.replaceTrack(cameraTrack);
-      }
-
-      // Revert local video
-      if (localVideoRef.current) {
-        localVideoRef.current.srcObject = localStreamRef.current;
-      }
-    }
-
-    setIsScreenSharing(false);
-    setMessages(prev => [...prev, {
-      sender: 'system',
-      text: "📹 Screen share stopped. Camera restored.",
-      timestamp: new Date()
-    }]);
-  };
 
   // Helper to set local filter and transmit it
   const selectFilter = (filterVal: string) => {
@@ -595,6 +490,41 @@ function VideoRoom({ roomId, ws, isInitiator }: VideoRoomProps) {
         ws.send(JSON.stringify({ type: "typing", isTyping: false }));
       }
     }, 1500);
+  };
+
+  // Helper to send image file over chat
+  const handleImageSend = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Limit file size to 1MB
+    if (file.size > 1024 * 1024) {
+      setMessages(prev => [...prev, {
+        sender: 'system',
+        text: '⚠️ Image too large. Please select an image under 1MB.',
+        timestamp: new Date()
+      }]);
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const base64 = reader.result as string;
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: "chat",
+          message: `[IMAGE]:${base64}`
+        }));
+
+        setMessages(prev => [...prev, {
+          sender: 'me',
+          image: base64,
+          timestamp: new Date()
+        }]);
+      }
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";
   };
 
   // Toggle Mute Audio
@@ -721,14 +651,14 @@ function VideoRoom({ roomId, ws, isInitiator }: VideoRoomProps) {
                 : 'w-full h-full relative'
             } ${localFilter === 'neon-glow' ? 'shadow-[0_0_20px_#10b981] border border-emerald-500' : ''} bg-zinc-900/60 overflow-hidden flex items-center justify-center`}
           >
-            {(!isVideoOff || isScreenSharing) && (localStream || screenStreamRef.current) ? (
+            {!isVideoOff && localStream ? (
               <video
                 ref={localVideoRef}
                 autoPlay
                 playsInline
                 muted
                 style={{ filter: localFilter === 'neon-glow' ? 'none' : localFilter }}
-                className={`w-full h-full object-cover ${isScreenSharing ? '' : 'scale-x-[-1]'}`}
+                className="w-full h-full object-cover scale-x-[-1]"
               />
             ) : (
               <div className="absolute inset-0 flex flex-col items-center justify-center text-center bg-zinc-950/80 p-2">
@@ -817,19 +747,6 @@ function VideoRoom({ roomId, ws, isInitiator }: VideoRoomProps) {
               {isVideoOff ? <VideoOff size={18} /> : <VideoIcon size={18} />}
             </button>
 
-            {/* Screen Share Button */}
-            <button
-              onClick={toggleScreenShare}
-              className={`p-3 rounded-full border transition duration-205 cursor-pointer shadow-md ${
-                isScreenSharing
-                  ? 'bg-purple-600 border-purple-500 text-white hover:bg-purple-500'
-                  : 'bg-zinc-800 border-white/10 text-zinc-300 hover:bg-zinc-700'
-              }`}
-              title={isScreenSharing ? "Stop Screen Share" : "Share Screen"}
-            >
-              {isScreenSharing ? <MonitorOff size={18} /> : <Monitor size={18} />}
-            </button>
-
             {/* Filter Toggle Button */}
             <button
               onClick={() => {
@@ -911,13 +828,22 @@ function VideoRoom({ roomId, ws, isInitiator }: VideoRoomProps) {
             return (
               <div key={index} className={`flex w-full ${isMe ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-1 duration-200`}>
                 <div className={`flex flex-col max-w-[75%] ${isMe ? 'items-end' : 'items-start'}`}>
-                  <div className={`px-3.5 py-2 text-sm shadow-md rounded-2xl break-words leading-relaxed ${
-                    isMe 
-                      ? 'bg-linear-to-r from-purple-600 to-indigo-600 text-white rounded-br-none' 
-                      : 'bg-zinc-800 text-zinc-100 rounded-bl-none border border-white/5'
-                  }`}>
-                    {msg.text}
-                  </div>
+                  {msg.image ? (
+                    <div 
+                      onClick={() => setSelectedLightboxImage(msg.image || null)}
+                      className="rounded-2xl overflow-hidden border border-white/10 shadow-md cursor-zoom-in hover:scale-[1.02] active:scale-98 transition duration-200 bg-zinc-900"
+                    >
+                      <img src={msg.image} alt="shared image" className="max-w-[180px] max-h-[180px] object-cover" />
+                    </div>
+                  ) : (
+                    <div className={`px-3.5 py-2 text-sm shadow-md rounded-2xl break-words leading-relaxed ${
+                      isMe 
+                        ? 'bg-linear-to-r from-purple-600 to-indigo-600 text-white rounded-br-none' 
+                        : 'bg-zinc-800 text-zinc-100 rounded-bl-none border border-white/5'
+                    }`}>
+                      {msg.text}
+                    </div>
+                  )}
                   <span className="text-[9px] text-zinc-500 mt-1 px-1 font-mono">
                     {isMe ? 'You' : 'Stranger'} • {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                   </span>
@@ -943,6 +869,22 @@ function VideoRoom({ roomId, ws, isInitiator }: VideoRoomProps) {
         {/* Message Typing Box */}
         <form onSubmit={sendChatMessage} className="p-3 border-t border-white/10 bg-zinc-950/80 flex items-center gap-2">
           <input
+            type="file"
+            accept="image/*"
+            id="chat-image-input"
+            className="hidden"
+            onChange={handleImageSend}
+          />
+          <button
+            type="button"
+            onClick={() => document.getElementById("chat-image-input")?.click()}
+            className="p-2.5 bg-zinc-800 hover:bg-zinc-700 active:scale-95 text-zinc-300 rounded-xl transition flex items-center justify-center cursor-pointer border border-white/5 shadow-md"
+            title="Send Image"
+          >
+            <ImageIcon size={16} />
+          </button>
+
+          <input
             type="text"
             value={inputText}
             onChange={handleInputChange}
@@ -960,6 +902,24 @@ function VideoRoom({ roomId, ws, isInitiator }: VideoRoomProps) {
 
       </div>
       
+      {/* Lightbox Modal for Expanded Images */}
+      {selectedLightboxImage && (
+        <div 
+          onClick={() => setSelectedLightboxImage(null)}
+          className="fixed inset-0 z-50 bg-black/95 flex items-center justify-center p-4 cursor-zoom-out animate-fade-in"
+        >
+          <motion.img 
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0.9, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            src={selectedLightboxImage} 
+            alt="Expanded shared image" 
+            className="max-w-full max-h-full object-contain rounded-xl shadow-2xl"
+          />
+        </div>
+      )}
+
     </div>
   )
 }

@@ -15,25 +15,7 @@ export default function Home() {
   const [isInitiator, setIsInitiator] = useState(false)
   const [ws, setWs] = useState<WebSocket | null>(null)
 
-  const PREDEFINED_TAGS = ["Gaming", "Music", "Tech", "Movies", "Sports", "Chatting", "Anime", "Coding"]
-  const [selectedTags, setSelectedTags] = useState<string[]>([])
-  const [customTag, setCustomTag] = useState("")
-
-  const toggleTag = (tag: string) => {
-    setSelectedTags(prev =>
-      prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]
-    )
-  }
-
-  const addCustomTag = () => {
-    const trimmed = customTag.trim().toLowerCase()
-    if (trimmed && !selectedTags.includes(trimmed)) {
-      setSelectedTags(prev => [...prev, trimmed])
-      setCustomTag("")
-    }
-  }
-
-  const connectSocket = (tagsToSend: string[]) => {
+  const connectSocket = () => {
     const rawUrl = process.env.NEXT_PUBLIC_SOCKET_URL || "http://localhost:8000";
     const wsUrl = rawUrl.replace(/^http/, "ws");
     console.log("Connecting to WebSocket:", wsUrl);
@@ -41,7 +23,7 @@ export default function Home() {
 
     socket.onopen = () => {
       console.log("WebSocket connected successfully");
-      socket.send(JSON.stringify({ type: "start", tags: tagsToSend }));
+      socket.send(JSON.stringify({ type: "start" }));
       setStatus("waiting");
     };
 
@@ -87,10 +69,10 @@ export default function Home() {
 
   const startChat = () => {
     if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: "start", tags: selectedTags }));
+      ws.send(JSON.stringify({ type: "start" }));
       setStatus("waiting");
     } else {
-      connectSocket(selectedTags);
+      connectSocket();
     }
   };
 
@@ -116,93 +98,64 @@ export default function Home() {
     <div>
       <Navbar show={status!=="chatting"} />
       <main className="relative min-h-screen w-full bg-linear-to-br from-black via-zinc-900 to-black text-white overflow-hidden">
-        <div className="absolute -top-32 -left-32 w-96 h-96 bg-purple-600/20 rounded-full blur-3xl" />
-        <div className="absolute top-1/3 -right-32 w-96 h-96 bg-blue-600/20 rounded-full blur-3xl" />
+        {/* Animated Background Blurs */}
+        <motion.div 
+          animate={{
+            scale: [1, 1.25, 1],
+            x: [0, 30, 0],
+            y: [0, -40, 0],
+          }}
+          transition={{
+            repeat: Infinity,
+            duration: 12,
+            ease: "easeInOut"
+          }}
+          className="absolute -top-32 -left-32 w-96 h-96 bg-purple-600/20 rounded-full blur-3xl" 
+        />
+        <motion.div 
+          animate={{
+            scale: [1.25, 1, 1.25],
+            x: [0, -30, 0],
+            y: [0, 40, 0],
+          }}
+          transition={{
+            repeat: Infinity,
+            duration: 15,
+            ease: "easeInOut"
+          }}
+          className="absolute top-1/3 -right-32 w-96 h-96 bg-blue-600/20 rounded-full blur-3xl" 
+        />
         <AnimatePresence>
           {status === "idle" && <motion.div
-            initial={{ y: 40 }}
-            animate={{ y: 0 }}
+            initial={{ y: 40, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
             exit={{ y: 40, opacity: 0 }}
-            transition={{ duration: 0.4 }}
+            transition={{ duration: 0.5, ease: "easeOut" }}
             className="relative z-10 flex flex-col items-center justify-center min-h-screen px-6 text-center"
           >
-            <div className="mb-6 flex items-center justify-center w-16 h-16 rounded-2xl bg-white/10 backdrop-blur border-b border-white/10">
-              <Sparkle />
-            </div>
-            <div className="text-4xl sm:text-5xl font-bold tracking-tight mb-3">
+            {/* Infinitely Rotating Star Logo */}
+            <motion.div 
+              animate={{ rotate: 360 }}
+              transition={{ repeat: Infinity, duration: 8, ease: "linear" }}
+              className="mb-6 flex items-center justify-center w-16 h-16 rounded-2xl bg-linear-to-b from-purple-500/20 to-indigo-500/10 border border-purple-500/30 text-purple-400 shadow-[0_0_15px_rgba(168,85,247,0.15)]"
+            >
+              <Sparkle className="w-7 h-7" />
+            </motion.div>
+            <motion.h1 
+              initial={{ scale: 0.95 }}
+              animate={{ scale: 1 }}
+              transition={{ duration: 0.5 }}
+              className="text-5xl sm:text-6xl font-extrabold tracking-tight mb-4 bg-clip-text text-transparent bg-linear-to-r from-purple-400 via-pink-400 to-blue-400 drop-shadow-[0_2px_10px_rgba(168,85,247,0.2)] animate-pulse"
+            >
               LinkUp
-            </div>
+            </motion.h1>
             <p className="text-zinc-400 max-w-md mb-8 text-sm sm:text-base">
               Anonymous video conversations with strangers worldwide.
               No sign-up. No identity. Just pure connection.
             </p>
 
 
-            {/* Tag Selection UI */}
-            <div className="w-full max-w-md mb-8 p-5 rounded-2xl bg-white/5 border border-white/10 backdrop-blur-xs text-left">
-              <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-3">
-                Select your interests (Optional)
-              </label>
-              
-              <div className="flex flex-wrap gap-2 mb-3.5">
-                {PREDEFINED_TAGS.map((tag) => {
-                  const isSelected = selectedTags.includes(tag.toLowerCase());
-                  return (
-                    <button
-                      key={tag}
-                      onClick={() => toggleTag(tag.toLowerCase())}
-                      className={`px-3 py-1.5 rounded-full text-xs font-medium cursor-pointer transition duration-150 border ${
-                        isSelected
-                          ? "bg-purple-600 border-purple-500 text-white shadow-lg shadow-purple-500/20"
-                          : "bg-white/5 border-white/5 text-zinc-300 hover:bg-white/10"
-                      }`}
-                    >
-                      {tag}
-                    </button>
-                  );
-                })}
-              </div>
 
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  placeholder="Add custom tag (e.g. travel, books)"
-                  value={customTag}
-                  onChange={(e) => setCustomTag(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      addCustomTag();
-                    }
-                  }}
-                  className="flex-1 min-w-0 bg-white/5 text-white placeholder-zinc-500 px-3.5 py-2 rounded-xl border border-white/5 focus:outline-hidden focus:border-purple-500 text-xs transition"
-                />
-                <button
-                  type="button"
-                  onClick={addCustomTag}
-                  className="px-4 py-2 bg-zinc-850 hover:bg-zinc-700 active:scale-95 border border-white/5 text-white rounded-xl text-xs font-medium transition cursor-pointer"
-                >
-                  Add
-                </button>
-              </div>
-
-              {selectedTags.some(t => !PREDEFINED_TAGS.map(pt => pt.toLowerCase()).includes(t)) && (
-                <div className="flex flex-wrap gap-1.5 mt-3 pt-3 border-t border-white/5">
-                  {selectedTags
-                    .filter(t => !PREDEFINED_TAGS.map(pt => pt.toLowerCase()).includes(t))
-                    .map((tag) => (
-                      <span
-                        key={tag}
-                        onClick={() => toggleTag(tag)}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-purple-600/35 border border-purple-500/30 text-[10px] text-purple-300 font-medium cursor-pointer hover:bg-red-950/40 hover:border-red-500/30 hover:text-red-300 transition"
-                        title="Click to remove"
-                      >
-                        #{tag} &times;
-                      </span>
-                    ))}
-                </div>
-              )}
-            </div>
 
             <motion.button
               whileHover={{ scale: 1.09 }}
