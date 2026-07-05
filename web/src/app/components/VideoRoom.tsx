@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef, useState } from 'react'
 import { motion } from 'motion/react'
-import { Mic, MicOff, Video as VideoIcon, VideoOff, Send, Loader2, Sparkles, MessageSquare, Smile, HelpCircle, Filter, Image as ImageIcon } from 'lucide-react'
+import { Mic, MicOff, Video as VideoIcon, VideoOff, Send, Loader2, Sparkles, MessageSquare, Smile, HelpCircle, Filter, Image as ImageIcon, RefreshCw } from 'lucide-react'
 
 interface VideoRoomProps {
   roomId: string;
@@ -72,6 +72,7 @@ function VideoRoom({ roomId, ws, isInitiator }: VideoRoomProps) {
   // Show panels toggles
   const [showFilterPanel, setShowFilterPanel] = useState(false);
   const [showReactionPanel, setShowReactionPanel] = useState(false);
+  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
 
   const localVideoRef = useRef<HTMLVideoElement | null>(null)
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null)
@@ -549,6 +550,72 @@ function VideoRoom({ roomId, ws, isInitiator }: VideoRoomProps) {
     }
   };
 
+  // Helper to switch front/rear cameras
+  const switchCamera = async () => {
+    if (!localStream) return;
+
+    const newFacingMode = facingMode === 'user' ? 'environment' : 'user';
+    console.log("Switching camera to facingMode:", newFacingMode);
+
+    try {
+      // Stop current video tracks
+      const videoTrack = localStream.getVideoTracks()[0];
+      if (videoTrack) {
+        videoTrack.stop();
+      }
+
+      // Request new video stream with target facingMode
+      const newStream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: newFacingMode,
+          width: { ideal: 640 },
+          height: { ideal: 480 }
+        },
+        audio: false
+      });
+
+      const newVideoTrack = newStream.getVideoTracks()[0];
+
+      // Replace track on the WebRTC peer connection
+      if (peerConnectionRef.current) {
+        const senders = peerConnectionRef.current.getSenders();
+        const videoSender = senders.find(s => s.track?.kind === 'video' || (s.track === null && s.dtmf === null));
+        if (videoSender) {
+          await videoSender.replaceTrack(newVideoTrack);
+        }
+      }
+
+      // Update local stream state
+      const updatedStream = new MediaStream([
+        newVideoTrack,
+        ...localStream.getAudioTracks()
+      ]);
+
+      localStreamRef.current = updatedStream;
+      setLocalStream(updatedStream);
+
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = updatedStream;
+      }
+
+      setFacingMode(newFacingMode);
+
+      setMessages(prev => [...prev, {
+        sender: 'system',
+        text: `📹 Switched to ${newFacingMode === 'user' ? 'front' : 'back'} camera.`,
+        timestamp: new Date()
+      }]);
+
+    } catch (err: any) {
+      console.error("Error switching camera:", err);
+      setMessages(prev => [...prev, {
+        sender: 'system',
+        text: `⚠️ Camera Switch Error: ${err.message || err}`,
+        timestamp: new Date()
+      }]);
+    }
+  };
+
   // Send text chat message
   const sendChatMessage = (e: React.FormEvent) => {
     e.preventDefault();
@@ -658,7 +725,7 @@ function VideoRoom({ roomId, ws, isInitiator }: VideoRoomProps) {
                 playsInline
                 muted
                 style={{ filter: localFilter === 'neon-glow' ? 'none' : localFilter }}
-                className="w-full h-full object-cover scale-x-[-1]"
+                className={`w-full h-full object-cover ${facingMode === 'user' ? 'scale-x-[-1]' : ''}`}
               />
             ) : (
               <div className="absolute inset-0 flex flex-col items-center justify-center text-center bg-zinc-950/80 p-2">
@@ -745,6 +812,15 @@ function VideoRoom({ roomId, ws, isInitiator }: VideoRoomProps) {
               title={isVideoOff ? "Turn Camera On" : "Turn Camera Off"}
             >
               {isVideoOff ? <VideoOff size={18} /> : <VideoIcon size={18} />}
+            </button>
+
+            {/* Flip Camera Button */}
+            <button
+              onClick={switchCamera}
+              className="p-3 rounded-full border bg-zinc-800 border-white/10 text-zinc-300 hover:bg-zinc-700 transition duration-205 cursor-pointer shadow-md active:scale-95"
+              title="Flip Camera (Front/Back)"
+            >
+              <RefreshCw size={18} />
             </button>
 
             {/* Filter Toggle Button */}
