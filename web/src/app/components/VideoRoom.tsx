@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef, useState } from 'react'
 import { motion } from 'motion/react'
-import { Mic, MicOff, Video as VideoIcon, VideoOff, Send, Loader2, Sparkles, MessageSquare } from 'lucide-react'
+import { Mic, MicOff, Video as VideoIcon, VideoOff, Send, Loader2, Sparkles, MessageSquare, Monitor, MonitorOff, Smile, HelpCircle, Filter } from 'lucide-react'
 
 interface VideoRoomProps {
   roomId: string;
@@ -27,6 +27,53 @@ function VideoRoom({ roomId, ws, isInitiator }: VideoRoomProps) {
   ])
   const [inputText, setInputText] = useState("")
   const [isMyVideoMain, setIsMyVideoMain] = useState(false)
+
+  // Floating reactions
+  const [floatingReactions, setFloatingReactions] = useState<{ id: number; emoji: string; left: number }[]>([]);
+
+  // Shared icebreakers
+  const ICEBREAKERS = [
+    "If you could have dinner with any historical figure, who would it be?",
+    "What is the weirdest food combination that you actually enjoy?",
+    "What is your dream travel destination and why?",
+    "If you could only watch one movie for the rest of your life, what would it be?",
+    "What is the most adventurous thing you've ever done?",
+    "If you had a superpower, what would it be?",
+    "What's your favorite hobby that you could talk about for hours?",
+    "Are you a morning person or a night owl?",
+    "What is your absolute favorite game (board game or video game)?",
+    "What's the best piece of advice you've ever received?",
+    "If you won a million dollars today, what's the first thing you'd buy?",
+    "What is the most unusual skill or talent you have?",
+    "What's your go-to comfort food?",
+    "If you could live in any fictional universe (books/movies), where would it be?"
+  ];
+
+  // Screen sharing states & refs
+  const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const screenStreamRef = useRef<MediaStream | null>(null);
+
+  // Video filter list & states
+  const VIDEO_FILTERS = [
+    { name: "Normal", value: "none" },
+    { name: "Grayscale", value: "grayscale(100%)" },
+    { name: "Sepia", value: "sepia(100%)" },
+    { name: "Invert", value: "invert(100%)" },
+    { name: "Blur", value: "blur(4px)" },
+    { name: "Vintage", value: "sepia(60%) contrast(90%) hue-rotate(-20deg)" },
+    { name: "Neon Glow", value: "neon-glow" }
+  ];
+  const [localFilter, setLocalFilter] = useState("none");
+  const [remoteFilter, setRemoteFilter] = useState("none");
+
+  // Typing indicator states & refs
+  const [isTyping, setIsTyping] = useState(false);
+  const [isStrangerTyping, setIsStrangerTyping] = useState(false);
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // Show panels toggles
+  const [showFilterPanel, setShowFilterPanel] = useState(false);
+  const [showReactionPanel, setShowReactionPanel] = useState(false);
 
   const localVideoRef = useRef<HTMLVideoElement | null>(null)
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null)
@@ -141,6 +188,12 @@ function VideoRoom({ roomId, ws, isInitiator }: VideoRoomProps) {
       }
       if (localStreamInstance) {
         localStreamInstance.getTracks().forEach(track => track.stop());
+      }
+      if (screenStreamRef.current) {
+        screenStreamRef.current.getTracks().forEach(track => track.stop());
+      }
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
       }
     };
   }, [roomId, ws]);
@@ -350,6 +403,18 @@ function VideoRoom({ roomId, ws, isInitiator }: VideoRoomProps) {
           text: data.message,
           timestamp: new Date()
         }]);
+      } else if (data.type === "reaction") {
+        triggerReaction(data.reaction);
+      } else if (data.type === "icebreaker") {
+        setMessages(prev => [...prev, {
+          sender: 'system',
+          text: `💡 Stranger suggested: "${data.question}"`,
+          timestamp: new Date()
+        }]);
+      } else if (data.type === "filter") {
+        setRemoteFilter(data.filter);
+      } else if (data.type === "typing") {
+        setIsStrangerTyping(data.isTyping);
       }
     };
 
@@ -358,6 +423,135 @@ function VideoRoom({ roomId, ws, isInitiator }: VideoRoomProps) {
       ws.removeEventListener("message", onMessage);
     };
   }, [ws, isInitiator]);
+
+  // Helper to trigger a floating reaction locally
+  const triggerReaction = (emoji: string) => {
+    const id = Date.now() + Math.random();
+    const left = Math.floor(Math.random() * 80) + 10; // 10% to 90%
+    setFloatingReactions(prev => [...prev, { id, emoji, left }]);
+    setTimeout(() => {
+      setFloatingReactions(prev => prev.filter(r => r.id !== id));
+    }, 2500);
+  };
+
+  // Helper to send a reaction through WebSocket
+  const sendReaction = (emoji: string) => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "reaction", reaction: emoji }));
+      triggerReaction(emoji);
+    }
+  };
+
+  // Helper to send a shared icebreaker question
+  const sendIcebreaker = () => {
+    const randomIdx = Math.floor(Math.random() * ICEBREAKERS.length);
+    const question = ICEBREAKERS[randomIdx];
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "icebreaker", question }));
+      setMessages(prev => [...prev, {
+        sender: 'system',
+        text: `💡 You suggested: "${question}"`,
+        timestamp: new Date()
+      }]);
+    }
+  };
+
+  // Helper to toggle screen share
+  const toggleScreenShare = async () => {
+    if (!peerConnectionRef.current) return;
+
+    if (!isScreenSharing) {
+      try {
+        console.log("Requesting screen share stream...");
+        const stream = await navigator.mediaDevices.getDisplayMedia({
+          video: true,
+          audio: false
+        });
+        screenStreamRef.current = stream;
+
+        const screenTrack = stream.getVideoTracks()[0];
+        
+        // Find video sender
+        const senders = peerConnectionRef.current.getSenders();
+        const videoSender = senders.find(s => s.track && s.track.kind === 'video');
+        
+        if (videoSender) {
+          await videoSender.replaceTrack(screenTrack);
+        }
+
+        // Set local video to screen stream
+        if (localVideoRef.current) {
+          localVideoRef.current.srcObject = stream;
+        }
+
+        // Listen for track end
+        screenTrack.onended = () => {
+          stopScreenShareDirectly();
+        };
+
+        setIsScreenSharing(true);
+      } catch (err) {
+        console.error("Failed to start screen share:", err);
+      }
+    } else {
+      await stopScreenShareDirectly();
+    }
+  };
+
+  const stopScreenShareDirectly = async () => {
+    if (screenStreamRef.current) {
+      screenStreamRef.current.getTracks().forEach(t => t.stop());
+      screenStreamRef.current = null;
+    }
+
+    if (localStreamRef.current && peerConnectionRef.current) {
+      const cameraTrack = localStreamRef.current.getVideoTracks()[0];
+      const senders = peerConnectionRef.current.getSenders();
+      const videoSender = senders.find(s => s.track && s.track.kind === 'video');
+      
+      if (videoSender && cameraTrack) {
+        await videoSender.replaceTrack(cameraTrack);
+      }
+
+      // Revert local video
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = localStreamRef.current;
+      }
+    }
+
+    setIsScreenSharing(false);
+  };
+
+  // Helper to set local filter and transmit it
+  const selectFilter = (filterVal: string) => {
+    setLocalFilter(filterVal);
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "filter", filter: filterVal }));
+    }
+  };
+
+  // Helper to handle text input and trigger typing indicator
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setInputText(e.target.value);
+
+    if (!isTyping) {
+      setIsTyping(true);
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "typing", isTyping: true }));
+      }
+    }
+
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+    }
+
+    typingTimeoutRef.current = setTimeout(() => {
+      setIsTyping(false);
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "typing", isTyping: false }));
+      }
+    }, 1500);
+  };
 
   // Toggle Mute Audio
   const toggleMute = () => {
@@ -392,6 +586,13 @@ function VideoRoom({ roomId, ws, isInitiator }: VideoRoomProps) {
         message: inputText.trim()
       }));
 
+      // Immediately clear typing state
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+      }
+      setIsTyping(false);
+      ws.send(JSON.stringify({ type: "typing", isTyping: false }));
+
       setMessages(prev => [...prev, {
         sender: 'me',
         text: inputText.trim(),
@@ -408,6 +609,30 @@ function VideoRoom({ roomId, ws, isInitiator }: VideoRoomProps) {
       <div className="flex-1 flex flex-col p-4 gap-4 h-1/2 md:h-full justify-between items-center relative overflow-hidden">
         <div className="relative w-full h-full max-h-[75vh] bg-zinc-950 rounded-2xl overflow-hidden border border-white/5 shadow-2xl flex items-center justify-center">
           
+          {/* Floating Reactions Overlay */}
+          <div className="absolute inset-0 pointer-events-none z-30 overflow-hidden">
+            {floatingReactions.map((reaction) => (
+              <motion.div
+                key={reaction.id}
+                initial={{ y: "100%", x: 0, opacity: 0, scale: 0.8 }}
+                animate={{
+                  y: "-110vh",
+                  x: [0, (reaction.id % 2 === 0 ? 30 : -30), 0],
+                  opacity: [0, 1, 1, 0],
+                  scale: [0.8, 1.2, 1.2, 0.8]
+                }}
+                transition={{
+                  duration: 2.2,
+                  ease: "easeOut"
+                }}
+                style={{ left: `${reaction.left}%` }}
+                className="absolute bottom-4 text-4xl select-none"
+              >
+                {reaction.emoji}
+              </motion.div>
+            ))}
+          </div>
+
           {/* STRANGER VIDEO WINDOW */}
           <div 
             onClick={() => isMyVideoMain && setIsMyVideoMain(false)}
@@ -415,13 +640,14 @@ function VideoRoom({ roomId, ws, isInitiator }: VideoRoomProps) {
               isMyVideoMain 
                 ? 'absolute bottom-4 right-4 w-32 sm:w-48 aspect-video rounded-xl border border-white/20 shadow-2xl z-10 cursor-pointer hover:scale-105 hover:border-purple-500 transition-all duration-300' 
                 : 'w-full h-full relative'
-            } bg-zinc-900/60 overflow-hidden flex items-center justify-center`}
+            } ${remoteFilter === 'neon-glow' ? 'shadow-[0_0_20px_#a855f7] border border-purple-500' : ''} bg-zinc-900/60 overflow-hidden flex items-center justify-center`}
           >
             {remoteStream ? (
               <video
                 ref={remoteVideoRef}
                 autoPlay
                 playsInline
+                style={{ filter: remoteFilter === 'neon-glow' ? 'none' : remoteFilter }}
                 className="w-full h-full object-cover"
               />
             ) : (
@@ -438,7 +664,7 @@ function VideoRoom({ roomId, ws, isInitiator }: VideoRoomProps) {
             
             <div className={`absolute ${isMyVideoMain ? 'top-1.5 left-1.5 text-[8px]' : 'top-3 left-3 text-xs'} px-2.5 py-0.5 rounded-full bg-black/60 backdrop-blur-md font-semibold text-white/90 border border-white/10 flex items-center gap-1 shadow-md select-none`}>
               <span className="w-1.5 h-1.5 rounded-full bg-purple-500 animate-pulse"></span>
-              Stranger
+              Stranger {remoteFilter !== 'none' && `(${VIDEO_FILTERS.find(f => f.value === remoteFilter)?.name})`}
             </div>
           </div>
 
@@ -449,7 +675,7 @@ function VideoRoom({ roomId, ws, isInitiator }: VideoRoomProps) {
               !isMyVideoMain 
                 ? 'absolute bottom-4 right-4 w-32 sm:w-48 aspect-video rounded-xl border border-white/20 shadow-2xl z-10 cursor-pointer hover:scale-105 hover:border-green-500 transition-all duration-300' 
                 : 'w-full h-full relative'
-            } bg-zinc-900/60 overflow-hidden flex items-center justify-center`}
+            } ${localFilter === 'neon-glow' ? 'shadow-[0_0_20px_#10b981] border border-emerald-500' : ''} bg-zinc-900/60 overflow-hidden flex items-center justify-center`}
           >
             {!isVideoOff && localStream ? (
               <video
@@ -457,6 +683,7 @@ function VideoRoom({ roomId, ws, isInitiator }: VideoRoomProps) {
                 autoPlay
                 playsInline
                 muted
+                style={{ filter: localFilter === 'neon-glow' ? 'none' : localFilter }}
                 className="w-full h-full object-cover scale-x-[-1]"
               />
             ) : (
@@ -468,10 +695,51 @@ function VideoRoom({ roomId, ws, isInitiator }: VideoRoomProps) {
 
             <div className={`absolute ${!isMyVideoMain ? 'top-1.5 left-1.5 text-[8px]' : 'top-3 left-3 text-xs'} px-2.5 py-0.5 rounded-full bg-black/60 backdrop-blur-md font-semibold text-white/90 border border-white/10 flex items-center gap-1 shadow-md select-none`}>
               <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span>
-              You
+              You {localFilter !== 'none' && `(${VIDEO_FILTERS.find(f => f.value === localFilter)?.name})`}
             </div>
           </div>
 
+        </div>
+
+        {/* Video Filters and Reactions Panels */}
+        <div className="w-full relative">
+          {showFilterPanel && (
+            <div className="absolute bottom-2 z-40 left-0 right-0 bg-zinc-905/95 border border-white/10 backdrop-blur-md p-3.5 rounded-2xl shadow-2xl flex flex-col gap-2 animate-in fade-in slide-in-from-bottom-2 duration-200">
+              <div className="text-[10px] uppercase font-semibold text-zinc-400 tracking-wider">Choose Video Filter</div>
+              <div className="flex flex-wrap gap-1.5">
+                {VIDEO_FILTERS.map((f) => (
+                  <button
+                    key={f.name}
+                    onClick={() => selectFilter(f.value)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer transition ${
+                      localFilter === f.value
+                        ? 'bg-purple-600 text-white shadow-md shadow-purple-500/20'
+                        : 'bg-white/5 hover:bg-white/10 text-zinc-300'
+                    }`}
+                  >
+                    {f.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {showReactionPanel && (
+            <div className="absolute bottom-2 z-40 left-0 right-0 bg-zinc-905/95 border border-white/10 backdrop-blur-md p-3.5 rounded-2xl shadow-2xl flex flex-col gap-2 animate-in fade-in slide-in-from-bottom-2 duration-200">
+              <div className="text-[10px] uppercase font-semibold text-zinc-400 tracking-wider">Send Quick Reaction</div>
+              <div className="flex gap-3 sm:gap-4 justify-center py-1">
+                {["❤️", "👍", "😂", "😮", "🔥", "🎉", "👏", "⚡"].map((emoji) => (
+                  <button
+                    key={emoji}
+                    onClick={() => sendReaction(emoji)}
+                    className="text-3xl hover:scale-125 transition duration-150 cursor-pointer active:scale-95"
+                  >
+                    {emoji}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Floating Controls Overlay */}
@@ -504,6 +772,51 @@ function VideoRoom({ roomId, ws, isInitiator }: VideoRoomProps) {
             >
               {isVideoOff ? <VideoOff size={18} /> : <VideoIcon size={18} />}
             </button>
+
+            {/* Screen Share Button */}
+            <button
+              onClick={toggleScreenShare}
+              className={`p-3 rounded-full border transition duration-205 cursor-pointer shadow-md ${
+                isScreenSharing
+                  ? 'bg-purple-600 border-purple-500 text-white hover:bg-purple-500'
+                  : 'bg-zinc-800 border-white/10 text-zinc-300 hover:bg-zinc-700'
+              }`}
+              title={isScreenSharing ? "Stop Screen Share" : "Share Screen"}
+            >
+              {isScreenSharing ? <MonitorOff size={18} /> : <Monitor size={18} />}
+            </button>
+
+            {/* Filter Toggle Button */}
+            <button
+              onClick={() => {
+                setShowFilterPanel(!showFilterPanel);
+                setShowReactionPanel(false);
+              }}
+              className={`p-3 rounded-full border transition duration-205 cursor-pointer shadow-md ${
+                showFilterPanel || localFilter !== "none"
+                  ? 'bg-indigo-600 border-indigo-500 text-white hover:bg-indigo-500'
+                  : 'bg-zinc-800 border-white/10 text-zinc-300 hover:bg-zinc-700'
+              }`}
+              title="Apply Video Filter"
+            >
+              <Filter size={18} />
+            </button>
+
+            {/* Reaction Toggle Button */}
+            <button
+              onClick={() => {
+                setShowReactionPanel(!showReactionPanel);
+                setShowFilterPanel(false);
+              }}
+              className={`p-3 rounded-full border transition duration-205 cursor-pointer shadow-md ${
+                showReactionPanel
+                  ? 'bg-pink-650 border-pink-500 text-white hover:bg-pink-500 shadow-lg shadow-pink-500/20'
+                  : 'bg-zinc-800 border-white/10 text-zinc-300 hover:bg-zinc-700'
+              }`}
+              title="Send Reaction Emoji"
+            >
+              <Smile size={18} />
+            </button>
           </div>
 
           <div className="flex items-center gap-2">
@@ -527,10 +840,14 @@ function VideoRoom({ roomId, ws, isInitiator }: VideoRoomProps) {
             <MessageSquare size={14} className="text-purple-400" />
             Conversation Log
           </div>
-          <div className="text-[10px] text-zinc-500 px-2 py-0.5 rounded-full bg-white/5 border border-white/5 flex items-center gap-1 font-mono">
-            <Sparkles size={10} className="text-yellow-400 animate-pulse" />
-            stranger-chat
-          </div>
+          <button
+            onClick={sendIcebreaker}
+            className="text-[10px] bg-purple-650/45 hover:bg-purple-650 border border-purple-500/40 text-purple-200 px-3 py-1 rounded-full flex items-center gap-1.5 cursor-pointer font-semibold transition shadow-md shadow-purple-500/5 active:scale-95"
+            title="Generate a fun icebreaker question"
+          >
+            <HelpCircle size={11} className="text-purple-300" />
+            Icebreaker 💡
+          </button>
         </div>
 
         {/* Chat History Messages */}
@@ -538,8 +855,8 @@ function VideoRoom({ roomId, ws, isInitiator }: VideoRoomProps) {
           {messages.map((msg, index) => {
             if (msg.sender === 'system') {
               return (
-                <div key={index} className="flex justify-center my-2">
-                  <span className="text-[10px] text-zinc-500 bg-white/5 border border-white/5 px-3 py-1 rounded-full text-center max-w-[85%] select-none font-mono">
+                <div key={index} className="flex justify-center my-2 animate-in fade-in zoom-in-95 duration-200">
+                  <span className="text-[10px] text-zinc-400 bg-purple-950/20 border border-purple-500/10 px-3.5 py-1.5 rounded-xl text-center max-w-[85%] select-none font-mono">
                     {msg.text}
                   </span>
                 </div>
@@ -548,7 +865,7 @@ function VideoRoom({ roomId, ws, isInitiator }: VideoRoomProps) {
             
             const isMe = msg.sender === 'me';
             return (
-              <div key={index} className={`flex w-full ${isMe ? 'justify-end' : 'justify-start'}`}>
+              <div key={index} className={`flex w-full ${isMe ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-1 duration-200`}>
                 <div className={`flex flex-col max-w-[75%] ${isMe ? 'items-end' : 'items-start'}`}>
                   <div className={`px-3.5 py-2 text-sm shadow-md rounded-2xl break-words leading-relaxed ${
                     isMe 
@@ -567,12 +884,24 @@ function VideoRoom({ roomId, ws, isInitiator }: VideoRoomProps) {
           <div ref={chatEndRef} />
         </div>
 
+        {/* Typing Indicator */}
+        {isStrangerTyping && (
+          <div className="px-4 py-1.5 flex items-center gap-2 bg-zinc-950/40 border-t border-white/5 text-[11px] text-zinc-400 font-mono">
+            <div className="flex gap-0.5 items-center">
+              <span className="w-1.5 h-1.5 bg-purple-500 rounded-full animate-bounce" style={{ animationDelay: '0ms', animationDuration: '0.6s' }} />
+              <span className="w-1.5 h-1.5 bg-purple-500 rounded-full animate-bounce" style={{ animationDelay: '150ms', animationDuration: '0.6s' }} />
+              <span className="w-1.5 h-1.5 bg-purple-500 rounded-full animate-bounce" style={{ animationDelay: '300ms', animationDuration: '0.6s' }} />
+            </div>
+            Stranger is typing...
+          </div>
+        )}
+
         {/* Message Typing Box */}
         <form onSubmit={sendChatMessage} className="p-3 border-t border-white/10 bg-zinc-950/80 flex items-center gap-2">
           <input
             type="text"
             value={inputText}
-            onChange={(e) => setInputText(e.target.value)}
+            onChange={handleInputChange}
             placeholder="Type message to stranger..."
             className="flex-1 bg-zinc-900 text-white placeholder-zinc-500 px-4 py-2.5 rounded-xl border border-white/5 focus:outline-hidden focus:border-purple-500 text-sm transition"
           />

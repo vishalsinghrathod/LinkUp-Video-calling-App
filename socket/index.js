@@ -29,7 +29,7 @@ wss.on("connection", (ws) => {
       return
     }
 
-    const { type, payload, message } = parsed
+    const { type, payload, message, reaction, question, filter, isTyping, tags } = parsed
 
     if (type === "start") {
       // Prevent duplicate matching/queuing
@@ -37,10 +37,29 @@ wss.on("connection", (ws) => {
         return
       }
 
-      while (waitingQueue.length > 0) {
-        const partnerId = waitingQueue.shift()
+      ws.tags = (tags || []).map(t => t.toLowerCase().trim()).filter(Boolean)
+      ws.joinedQueueAt = Date.now()
+
+      let matchedPartnerIdx = -1
+      for (let i = 0; i < waitingQueue.length; i++) {
+        const partnerId = waitingQueue[i]
         const partnerWs = clients.get(partnerId)
         if (partnerWs && partnerWs.readyState === partnerWs.OPEN) {
+          const hasCommonTag = ws.tags.some(tag => (partnerWs.tags || []).includes(tag))
+          const isWildcard = ws.tags.length === 0 || (partnerWs.tags || []).length === 0
+          const hasWaitedLong = (Date.now() - (partnerWs.joinedQueueAt || 0)) > 5000
+
+          if (hasCommonTag || isWildcard || hasWaitedLong) {
+            matchedPartnerIdx = i
+            break
+          }
+        }
+      }
+
+      if (matchedPartnerIdx !== -1) {
+        const partnerId = waitingQueue.splice(matchedPartnerIdx, 1)[0]
+        const partnerWs = clients.get(partnerId)
+        if (partnerWs) {
           const roomId = crypto.randomUUID()
           activePairs.set(ws.id, partnerId)
           activePairs.set(partnerId, ws.id)
@@ -89,6 +108,46 @@ wss.on("connection", (ws) => {
         const partnerWs = clients.get(partnerId)
         if (partnerWs && partnerWs.readyState === partnerWs.OPEN) {
           partnerWs.send(JSON.stringify({ type: "chat", sender: "partner", message }))
+        }
+      }
+    }
+
+    else if (type === "reaction") {
+      const partnerId = activePairs.get(ws.id)
+      if (partnerId) {
+        const partnerWs = clients.get(partnerId)
+        if (partnerWs && partnerWs.readyState === partnerWs.OPEN) {
+          partnerWs.send(JSON.stringify({ type: "reaction", reaction }))
+        }
+      }
+    }
+
+    else if (type === "icebreaker") {
+      const partnerId = activePairs.get(ws.id)
+      if (partnerId) {
+        const partnerWs = clients.get(partnerId)
+        if (partnerWs && partnerWs.readyState === partnerWs.OPEN) {
+          partnerWs.send(JSON.stringify({ type: "icebreaker", question }))
+        }
+      }
+    }
+
+    else if (type === "filter") {
+      const partnerId = activePairs.get(ws.id)
+      if (partnerId) {
+        const partnerWs = clients.get(partnerId)
+        if (partnerWs && partnerWs.readyState === partnerWs.OPEN) {
+          partnerWs.send(JSON.stringify({ type: "filter", filter }))
+        }
+      }
+    }
+
+    else if (type === "typing") {
+      const partnerId = activePairs.get(ws.id)
+      if (partnerId) {
+        const partnerWs = clients.get(partnerId)
+        if (partnerWs && partnerWs.readyState === partnerWs.OPEN) {
+          partnerWs.send(JSON.stringify({ type: "typing", isTyping }))
         }
       }
     }
