@@ -91,10 +91,15 @@ function VideoRoom({ roomId, ws, isInitiator }: VideoRoomProps) {
 
   // Attach local stream to element when ready
   useEffect(() => {
-    if (localStream && localVideoRef.current) {
-      localVideoRef.current.srcObject = localStream
+    const videoElement = localVideoRef.current;
+    if (!videoElement) return;
+
+    if (isScreenSharing && screenStreamRef.current) {
+      videoElement.srcObject = screenStreamRef.current;
+    } else if (localStream) {
+      videoElement.srcObject = localStream;
     }
-  }, [localStream])
+  }, [localStream, isScreenSharing, isVideoOff]);
 
   // Attach remote stream to element when ready
   useEffect(() => {
@@ -458,7 +463,14 @@ function VideoRoom({ roomId, ws, isInitiator }: VideoRoomProps) {
 
   // Helper to toggle screen share
   const toggleScreenShare = async () => {
-    if (!peerConnectionRef.current) return;
+    if (!peerConnectionRef.current) {
+      setMessages(prev => [...prev, {
+        sender: 'system',
+        text: "⚠️ Screen Share failed: No active connection with stranger.",
+        timestamp: new Date()
+      }]);
+      return;
+    }
 
     if (!isScreenSharing) {
       try {
@@ -470,13 +482,23 @@ function VideoRoom({ roomId, ws, isInitiator }: VideoRoomProps) {
         screenStreamRef.current = stream;
 
         const screenTrack = stream.getVideoTracks()[0];
+        console.log("Got screen share track:", screenTrack);
         
-        // Find video sender
+        // Find video sender (standard or fallback with null track)
         const senders = peerConnectionRef.current.getSenders();
-        const videoSender = senders.find(s => s.track && s.track.kind === 'video');
+        const videoSender = senders.find(s => s.track?.kind === 'video' || (s.track === null && s.dtmf === null));
         
         if (videoSender) {
+          console.log("Replacing WebRTC video track with screen track...");
           await videoSender.replaceTrack(screenTrack);
+        } else {
+          console.warn("No video sender found. Attempting fallback...");
+          const fallbackSender = senders.find(s => s.track && s.track.kind !== 'audio');
+          if (fallbackSender) {
+            await fallbackSender.replaceTrack(screenTrack);
+          } else {
+            throw new Error("No video transmitter found on the connection.");
+          }
         }
 
         // Set local video to screen stream
@@ -486,12 +508,27 @@ function VideoRoom({ roomId, ws, isInitiator }: VideoRoomProps) {
 
         // Listen for track end
         screenTrack.onended = () => {
+          console.log("Screen share track ended natively");
           stopScreenShareDirectly();
         };
 
         setIsScreenSharing(true);
-      } catch (err) {
+        setMessages(prev => [...prev, {
+          sender: 'system',
+          text: "🖥️ You started sharing your screen.",
+          timestamp: new Date()
+        }]);
+      } catch (err: any) {
         console.error("Failed to start screen share:", err);
+        setMessages(prev => [...prev, {
+          sender: 'system',
+          text: `⚠️ Screen Share Error: ${err.message || err}`,
+          timestamp: new Date()
+        }]);
+        if (screenStreamRef.current) {
+          screenStreamRef.current.getTracks().forEach(t => t.stop());
+          screenStreamRef.current = null;
+        }
       }
     } else {
       await stopScreenShareDirectly();
@@ -499,6 +536,7 @@ function VideoRoom({ roomId, ws, isInitiator }: VideoRoomProps) {
   };
 
   const stopScreenShareDirectly = async () => {
+    console.log("Stopping screen share...");
     if (screenStreamRef.current) {
       screenStreamRef.current.getTracks().forEach(t => t.stop());
       screenStreamRef.current = null;
@@ -507,9 +545,10 @@ function VideoRoom({ roomId, ws, isInitiator }: VideoRoomProps) {
     if (localStreamRef.current && peerConnectionRef.current) {
       const cameraTrack = localStreamRef.current.getVideoTracks()[0];
       const senders = peerConnectionRef.current.getSenders();
-      const videoSender = senders.find(s => s.track && s.track.kind === 'video');
+      const videoSender = senders.find(s => s.track?.kind === 'video' || (s.track === null && s.dtmf === null));
       
       if (videoSender && cameraTrack) {
+        console.log("Restoring WebRTC camera track...");
         await videoSender.replaceTrack(cameraTrack);
       }
 
@@ -520,6 +559,11 @@ function VideoRoom({ roomId, ws, isInitiator }: VideoRoomProps) {
     }
 
     setIsScreenSharing(false);
+    setMessages(prev => [...prev, {
+      sender: 'system',
+      text: "📹 Screen share stopped. Camera restored.",
+      timestamp: new Date()
+    }]);
   };
 
   // Helper to set local filter and transmit it
@@ -677,14 +721,14 @@ function VideoRoom({ roomId, ws, isInitiator }: VideoRoomProps) {
                 : 'w-full h-full relative'
             } ${localFilter === 'neon-glow' ? 'shadow-[0_0_20px_#10b981] border border-emerald-500' : ''} bg-zinc-900/60 overflow-hidden flex items-center justify-center`}
           >
-            {!isVideoOff && localStream ? (
+            {(!isVideoOff || isScreenSharing) && (localStream || screenStreamRef.current) ? (
               <video
                 ref={localVideoRef}
                 autoPlay
                 playsInline
                 muted
                 style={{ filter: localFilter === 'neon-glow' ? 'none' : localFilter }}
-                className="w-full h-full object-cover scale-x-[-1]"
+                className={`w-full h-full object-cover ${isScreenSharing ? '' : 'scale-x-[-1]'}`}
               />
             ) : (
               <div className="absolute inset-0 flex flex-col items-center justify-center text-center bg-zinc-950/80 p-2">
